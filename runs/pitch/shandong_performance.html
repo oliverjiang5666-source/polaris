@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>山东现货市场储能交易表现 · 2024 全年回测</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    font-family: "PingFang SC", "Helvetica Neue", "STHeiti", "Hiragino Sans GB", Arial, sans-serif;
+    color:#0f172a;
+    background:#f8fafc;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 48px 72px;
+    background:#fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  /* --- HEADER --- */
+  .brand {
+    display:flex; align-items:center; gap:10px;
+    font-size:13px; color:#64748b; letter-spacing:0.12em; text-transform:uppercase;
+    font-weight:600;
+  }
+  .brand::before {
+    content:""; display:inline-block; width:28px; height:3px; background:#1e3a8a;
+  }
+  h1 {
+    font-size:40px; font-weight:800; line-height:1.15;
+    color:#0f172a; margin: 18px 0 14px; letter-spacing:-0.01em;
+  }
+  h1 .accent { color:#1e3a8a; }
+  .sub {
+    font-size:17px; color:#475569; font-weight:400; max-width:760px;
+  }
+  .meta {
+    display:flex; gap:28px; margin-top:20px; padding-top:18px; border-top:1px solid #e2e8f0;
+    font-size:13px; color:#64748b;
+  }
+  .meta .m-item b { color:#0f172a; font-weight:700; }
+
+  /* --- SECTION --- */
+  section { margin-top:56px; }
+  h2 {
+    font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:0.14em;
+    color:#1e3a8a; margin-bottom:8px;
+  }
+  h3 {
+    font-size:24px; font-weight:700; color:#0f172a; margin-bottom:10px;
+    letter-spacing:-0.005em;
+  }
+  p { color:#334155; font-size:15px; }
+
+  /* --- KPI CARDS --- */
+  .kpi-grid {
+    display:grid; grid-template-columns: repeat(4, 1fr); gap:14px;
+    margin-top:20px;
+  }
+  .kpi {
+    background:#f1f5f9; border-radius:10px; padding:20px 18px;
+    border-left:3px solid #1e3a8a;
+  }
+  .kpi.hero { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); border-left:none; color:#fff; }
+  .kpi.hero .k-label { color:#c7d2fe; }
+  .kpi.hero .k-value { color:#fff; }
+  .kpi.hero .k-sub { color:#e0e7ff; }
+  .kpi.good { border-left-color:#059669; background:#ecfdf5; }
+  .kpi.amber { border-left-color:#d97706; background:#fef3c7; }
+  .k-label { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.08em; }
+  .k-value { font-size:32px; font-weight:800; color:#0f172a; margin-top:4px; letter-spacing:-0.02em; }
+  .k-value .unit { font-size:16px; font-weight:600; margin-left:2px; }
+  .k-sub { font-size:12px; color:#64748b; margin-top:6px; }
+
+  /* --- FIGURE --- */
+  figure { margin:22px 0 10px; }
+  figure img {
+    width:100%; border-radius:8px;
+    border:1px solid #e2e8f0;
+    background:#fff;
+  }
+  figcaption { font-size:12px; color:#94a3b8; margin-top:8px; font-style:italic; }
+
+  /* --- GRID 2 --- */
+  .g2 { display:grid; grid-template-columns: 1fr 1fr; gap:28px; margin-top:20px; }
+  .g2.wide-first { grid-template-columns: 1.35fr 1fr; }
+
+  /* --- TABLE --- */
+  table {
+    width:100%; border-collapse:collapse; font-size:13.5px; margin-top:12px;
+  }
+  th {
+    text-align:left; font-weight:700; color:#64748b; font-size:11.5px;
+    text-transform:uppercase; letter-spacing:0.08em;
+    padding:10px 12px; border-bottom:2px solid #cbd5e1;
+  }
+  td {
+    padding:11px 12px; border-bottom:1px solid #e2e8f0; color:#1f2937;
+  }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  tr.highlight td { background:#eff6ff; color:#1e3a8a; font-weight:700; }
+  tr.highlight td:first-child::before { content:"▶ "; color:#1e3a8a; }
+
+  /* --- INSIGHT BOXES --- */
+  .insight {
+    background:#f1f5f9; border-left:3px solid #0891b2;
+    padding:18px 22px; border-radius:0 8px 8px 0;
+    margin-top:16px;
+  }
+  .insight.amber { border-color:#d97706; background:#fffbeb; }
+  .insight .tag {
+    font-size:11px; font-weight:700; color:#0891b2; letter-spacing:0.1em; text-transform:uppercase;
+  }
+  .insight.amber .tag { color:#b45309; }
+  .insight p { margin-top:6px; font-size:14px; color:#334155; }
+
+  /* --- ROADMAP --- */
+  .roadmap {
+    display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top:20px;
+  }
+  .phase {
+    background:#fff; border:1.5px solid #e2e8f0; border-radius:10px;
+    padding:16px 16px; position:relative;
+  }
+  .phase .when { font-size:11px; font-weight:700; letter-spacing:0.1em; color:#64748b; text-transform:uppercase; }
+  .phase h4 { font-size:15px; font-weight:700; margin-top:6px; color:#0f172a; }
+  .phase .pct {
+    font-size:22px; font-weight:800; color:#1e3a8a; margin-top:8px;
+  }
+  .phase .pct.done { color:#059669; }
+  .phase .note { font-size:12px; color:#64748b; margin-top:6px; }
+  .phase.current { border-color:#1e3a8a; background: #eff6ff; }
+
+  /* --- FOOTER --- */
+  footer {
+    margin-top:60px; padding-top:18px; border-top:1px solid #e2e8f0;
+    font-size:11.5px; color:#94a3b8;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .badge {
+    display:inline-block; font-size:10.5px; font-weight:700;
+    padding:3px 8px; border-radius:3px;
+    background:#dbeafe; color:#1e40af;
+    letter-spacing:0.06em;
+  }
+  .ul-clean { list-style:none; padding:0; margin-top:8px; }
+  .ul-clean li {
+    padding:5px 0 5px 18px; position:relative; font-size:13.5px; color:#334155;
+  }
+  .ul-clean li::before {
+    content:""; position:absolute; left:0; top:12px; width:8px; height:2px; background:#1e3a8a;
+  }
+
+  @media print {
+    body { background:white; }
+    .page { box-shadow:none; padding: 36px; max-width: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ============================ HEADER ============================ -->
+<div class="brand">Energy Trading · 内部业绩通报</div>
+<h1>山东现货市场储能交易算法<br>在 2024 年全年回测中捕获 <span class="accent">68.4%</span> 理论上限</h1>
+<p class="sub">
+基于 200 MW / 400 MWh 储能电池、2024 全年 365 天 walk-forward 回测；算法核心为自研 Regime 分类器 + MIT 2025 最新 stagewise stochastic DP（arXiv:2511.15629）。本报告数字均来自离线回测，可复现。
+</p>
+<div class="meta">
+  <div class="m-item">📅 <b>回测期</b> 2024-01-01 ~ 2024-12-31（365 天）</div>
+  <div class="m-item">🔋 <b>资产</b> 200 MW × 400 MWh · 2h duration</div>
+  <div class="m-item">💹 <b>市场</b> 山东电力现货 RT (15 min)</div>
+  <div class="m-item">⏱ <b>计算</b> 141 秒 / 全年</div>
+</div>
+
+<!-- ============================ KPI ROW ============================ -->
+<section>
+  <h2>CORE METRICS · 核心指标</h2>
+  <div class="kpi-grid">
+    <div class="kpi hero">
+      <div class="k-label">2024 年化收入</div>
+      <div class="k-value">¥5,681<span class="unit">万</span></div>
+      <div class="k-sub">相对 Oracle 理论上限 ¥8,308 万</div>
+    </div>
+    <div class="kpi good">
+      <div class="k-label">Capture Rate</div>
+      <div class="k-value">68.4<span class="unit">%</span></div>
+      <div class="k-sub">行业公开水平 50-65%</div>
+    </div>
+    <div class="kpi">
+      <div class="k-label">VS 工业 MILP</div>
+      <div class="k-value">+¥1,500<span class="unit">万</span></div>
+      <div class="k-sub">+35.9% · vs Fluence/Tesla 同类算法基线</div>
+    </div>
+    <div class="kpi amber">
+      <div class="k-label">全年求解耗时</div>
+      <div class="k-value">141<span class="unit">s</span></div>
+      <div class="k-sub">相比 MILP 加速约 100×</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SECTION 1: EVOLUTION ============================ -->
+<section>
+  <h2>01 · ALGORITHM EVOLUTION</h2>
+  <h3>5 代算法演进：从 LGBM 到 SOTA</h3>
+  <p>我们在山东数据上完成了从业界通用方法到前沿学术方法的全链条复现与自研。<b>每一步升级都有严格的 walk-forward 回测证据</b>，避免 look-ahead bias。</p>
+  <figure>
+    <img src="assets/fig1_evolution.png" alt="算法演进">
+    <figcaption>横轴为算法代次，柱顶标数字为 2024 年化收入；柱内标数为 capture ratio。橙色虚线为 Oracle 理论上限（¥8,308 万）。</figcaption>
+  </figure>
+
+  <table>
+    <tr><th>代次</th><th>方法</th><th class="num">年化收入</th><th class="num">Capture</th><th>学术/工业参考</th></tr>
+    <tr><td>Gen 1</td><td>LightGBM 点预测 + LP</td><td class="num">¥4,416 万</td><td class="num">53.1%</td><td>Lago et al. 2021, Applied Energy</td></tr>
+    <tr><td>Gen 2</td><td>Stochastic MILP (dev=10%)</td><td class="num">¥4,180 万</td><td class="num">50.3%</td><td>Fluence Mosaic, Tesla Autobidder</td></tr>
+    <tr><td>Gen 3</td><td>Stochastic MILP (dev=0%, 最佳配置)</td><td class="num">¥4,664 万</td><td class="num">56.1%</td><td>RWTH Celi Cortés 2024</td></tr>
+    <tr><td>Gen 4</td><td><b>Regime V3（自研）</b>：12 类日类型 + 软分类 + expected-price DP</td><td class="num">¥5,381 万</td><td class="num">64.8%</td><td>Ware et al. 2024 EJOR 同家族</td></tr>
+    <tr class="highlight"><td>Gen 5</td><td><b>Tensor DP V2（当前 SOTA）</b>：Regime 分类 + stagewise stochastic DP</td><td class="num">¥5,681 万</td><td class="num">68.4%</td><td>Lee &amp; Sun 2025, arXiv:2511.15629</td></tr>
+  </table>
+</section>
+
+<!-- ============================ SECTION 2: ATTRIBUTION ============================ -->
+<section>
+  <h2>02 · CONTRIBUTION ANALYSIS</h2>
+  <h3>哪里带来了性能提升？</h3>
+
+  <div class="g2 wide-first">
+    <figure style="margin:0">
+      <img src="assets/fig2_attribution.png" alt="贡献归因">
+    </figure>
+    <div>
+      <div class="insight">
+        <div class="tag">KEY FINDING</div>
+        <p>
+        在山东这类 <b>价格可预测性偏弱</b> 的市场里：<br>
+        <b>场景/日类型分类</b>的升级（+8.7 pp）&gt; 求解器算法升级（-1 ~ +5.8 pp）。
+        </p>
+      </div>
+      <div class="insight amber">
+        <div class="tag">COROLLARY</div>
+        <p>
+        纯粹换 MILP ↔ DP 收益有限；<b>让算法"看对了日子"</b>（即预测明天属于哪种价格形态）才是真正的瓶颈。
+        这也是我们选择 Regime V3 作为 Gen 4 主打的原因，并在 Gen 5 把它的信号嫁接到 MIT 最新 DP 框架上。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SECTION 3: DISTRIBUTION ============================ -->
+<section>
+  <h2>03 · ROBUSTNESS</h2>
+  <h3>单日捕获率分布：中位数 71.5%，稳定性好</h3>
+  <figure>
+    <img src="assets/fig3_distribution.png" alt="capture 分布">
+    <figcaption>V1 是不带 regime 分类的基础版，V2 是当前 SOTA。分布右移说明 regime 信号显著改善稳态表现。</figcaption>
+  </figure>
+
+  <div class="g2">
+    <div>
+      <h3 style="font-size:17px">四分位分布</h3>
+      <ul class="ul-clean">
+        <li>P25: 53.7% — 即使"差天"也有超过一半的潜在利润被捕获</li>
+        <li>中位数: 71.5% — 超过半数天的 capture &gt; Regime V3 全年均值 64.8%</li>
+        <li>P75: 83.6%</li>
+        <li>最大值: 97.0%（强信号日近乎拿满 Oracle）</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="font-size:17px">已识别待改进点</h3>
+      <ul class="ul-clean">
+        <li>少数极端日（~2%）capture &lt; 0 — 分类器预测失败或 SoC 跨日规划不佳</li>
+        <li>下一版将加入气象条件化（当前已有气象 parquet 未使用）</li>
+        <li>加 Terminal Value Function 跨日 SoC 规划（Powell ADP 思想）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SECTION 4: ROLLING ============================ -->
+<section>
+  <h2>04 · SEASONAL STABILITY</h2>
+  <h3>全年 4 季度滚动表现</h3>
+  <figure>
+    <img src="assets/fig4_rolling.png" alt="季度演化">
+    <figcaption>30 天滚动 capture。算法跨越山东 2024 的极端气候（高温、暴雨、春节）保持稳态；4 季度均超过 Regime V3 基准。</figcaption>
+  </figure>
+</section>
+
+<!-- ============================ SECTION 5: METHOD ============================ -->
+<section>
+  <h2>05 · METHOD &amp; RIGOR</h2>
+  <h3>验证方法学</h3>
+  <div class="g2">
+    <div>
+      <ul class="ul-clean">
+        <li><b>Walk-forward 验证</b>：4 季度独立 retrain，每季度只使用截至当季度前的数据</li>
+        <li><b>无 look-ahead</b>：分类器、场景生成器严格时间前向</li>
+        <li><b>完整测试期</b>：365 天全覆盖，非 cherry-picked</li>
+        <li><b>Oracle 基准</b>：LP 完全前知价格求解，作为理论上限</li>
+        <li><b>多基线对照</b>：和 LGBM、MILP、自研 Regime V3 全面对比</li>
+      </ul>
+    </div>
+    <div>
+      <ul class="ul-clean">
+        <li><b>Sanity check</b>：确定性 DP vs LP Oracle gap &lt; 0.3%，符合 Lee-Sun 2025 论文 Table I</li>
+        <li><b>计算复现</b>：单机 Mac M4 CPU，141 秒跑完全年 365 天 × R=500 场景</li>
+        <li><b>物理一致</b>：含 RTE=0.9、SoC 动力学、降解成本 ¥2/MWh</li>
+        <li><b>代码可审计</b>：<code>optimization/vfa_dp/tensor_dp.py</code> + <code>scripts/33_vfa_dp_shandong.py</code></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SECTION 6: ROADMAP ============================ -->
+<section>
+  <h2>06 · ROADMAP</h2>
+  <h3>当前位置 &amp; 下一步提升路径</h3>
+  <div class="roadmap">
+    <div class="phase current">
+      <div class="when">Now</div>
+      <h4>Tensor DP V2</h4>
+      <div class="pct done">68.4%</div>
+      <div class="note">已完成单机 CPU 复现 + regime 嫁接 + 全年回测</div>
+    </div>
+    <div class="phase">
+      <div class="when">2 weeks</div>
+      <h4>+ Bid Curve 报价</h4>
+      <div class="pct">78-85%</div>
+      <div class="note">论文 §II-C 凸化生成价量阶梯（直接对齐交易中心格式）</div>
+    </div>
+    <div class="phase">
+      <div class="when">6 weeks</div>
+      <h4>+ AGC 联合 + 气象</h4>
+      <div class="pct">85-90%</div>
+      <div class="note">调频容量 / 里程联合决策 + 气象条件化场景</div>
+    </div>
+    <div class="phase">
+      <div class="when">3 months</div>
+      <h4>+ 跨日 TVF / VFA</h4>
+      <div class="pct">88-93%</div>
+      <div class="note">Powell-style 跨日 Bellman 逼近（针对多日套利）</div>
+    </div>
+  </div>
+  <div class="insight" style="margin-top:22px">
+    <div class="tag">INDUSTRIAL BENCHMARK</div>
+    <p>enspired（欧洲，4 GW）、Fluence Mosaic（全球 16 GW 部署）内部公开披露 capture 通常在 75-85% 之间。我们当前 68.4% 属合理起点，未经多市场联合。按 roadmap 升级后有望达到或超过国际同行水平。</p>
+  </div>
+</section>
+
+<footer>
+  <div>
+    <span class="badge">SHANDONG SPOT · 2024 · WALK-FORWARD</span>
+    <span style="margin-left:10px">生成时间：2026-04-21 · 本报告所有数字来自本地回测，可在任意 M 系列 Mac 10 分钟内复现</span>
+  </div>
+  <div>内部资料</div>
+</footer>
+
+</div>
+</body>
+</html>

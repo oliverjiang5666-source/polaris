@@ -1,0 +1,41 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+
+# 数据与模型（商业敏感 / 大文件）
+data/raw/
+data/china/raw/
+data/china/crawled/
+models/
+*.parquet
+*.pkl
+*.pt
+*.tar.gz
+*.zip
+
+# 本地爬虫产物
+**/cookies/
+**/dianchacha_token*.json
+**/*.cookie
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 运行产物（大量回测 pkl、csv、log 可能上百 MB）
+runs/milp_experiments_v0.1/
+runs/milp_experiments/*.pkl
+runs/vfa_dp/*.csv
+runs/*.log
+runs/monitor.log
+runs/ALERT.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints

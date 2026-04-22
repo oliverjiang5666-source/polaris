@@ -1,0 +1,7 @@
+variant,days,total_revenue,mean_revenue_per_day,mean_objective,mean_solve_time
+A1_bootstrap_uniform,10,1231786.07,123178.61,154385.12,100.82
+A2_regime_profile,10,1133032.66,113303.27,146293.77,0.34
+A3_bootstrap_weighted,10,1219117.06,121911.71,154433.79,90.33
+A4_regime_mean_K,10,1140529.45,114052.95,145759.01,79.31
+A5_bootstrap_RT_only,10,859843.94,85984.39,145844.68,0.03
+A6_profile_RT_only,10,911230.39,91123.04,147586.75,0.03

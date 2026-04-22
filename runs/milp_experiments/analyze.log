@@ -1,0 +1,69 @@
+2026-04-21 11:49:26.403 | INFO     | __main__:main:24 - 加载 9 个实验
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:89 - 
+==============================================================================================================
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:90 - Config                                  MILP 收入   Regime V3        LGBM vs Regime   vs LGBM  Capture   Time
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:92 - --------------------------------------------------------------------------------------------------------------
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_K_050                           3,903万      5,381万      4,416万    -27.5%    -11.6%    47.0%   7.5m
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_K_100                           4,054万      5,381万      4,416万    -24.7%     -8.2%    48.8%  17.6m
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_baseline                        4,180万      5,381万      4,416万    -22.3%     -5.3%    50.3%  69.0m
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_deg_08                          3,918万      5,381万      4,416万    -27.2%    -11.3%    47.2%  63.2m
+2026-04-21 11:49:26.406 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_deg_20                          3,659万      5,381万      4,416万    -32.0%    -17.1%    44.0%  66.3m
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_deg_50                          2,834万      5,381万      4,416万    -47.3%    -35.8%    34.1%  69.7m
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_dev_00                          4,664万      5,381万      4,416万    -13.3%     +5.6%    56.1%  12.2m
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_dev_20                          2,778万      5,381万      4,416万    -48.4%    -37.1%    33.4%  62.7m
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:print_table:94 - shandong_dev_50                         -1,600万      5,381万      4,416万   -129.7%   -136.2%   -19.3%  40.6m
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:print_table:104 - ==============================================================================================================
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:109 - 
+【偏差界消融】山东
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:110 - Dev            Revenue   vs Baseline
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:124 -   0%              4,664万        +11.6%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:124 -   10%             4,180万         +0.0%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:124 -   20%             2,778万        -33.5%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_dev:124 -   50%            -1,600万       -138.3%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:129 - 
+【降解成本消融】山东
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:130 - Deg            Revenue   vs Baseline
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:147 -   ¥2              4,180万         +0.0%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:147 -   ¥8              3,918万         -6.3%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:147 -   ¥20             3,659万        -12.5%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_deg:147 -   ¥50             2,834万        -32.2%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:152 - 
+【K 消融】山东
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:153 - K              Revenue   Wall Time      Edge
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:173 -   50              3,903万        7.5m          
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:173 -   100             4,054万       17.6m     +3.9%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:173 -   200             4,180万       69.0m     +3.1%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_ablation_K:163 -   K=500: [missing]
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:178 - 
+【跨省泛化】
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:179 - Province              MILP     Regime V3   vs Regime   Capture
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:188 -   shandong            4,180万        5,381万      -22.3%     50.3%
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:183 -   shanxi: [missing]
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:183 -   guangdong: [missing]
+2026-04-21 11:49:26.407 | INFO     | optimization.milp.analyze_results:analyze_multiprovince:183 -   gansu: [missing]
+Traceback (most recent call last):
+  File "/Users/jjj/Library/Python/3.9/lib/python/site-packages/pandas/compat/_optional.py", line 135, in import_optional_dependency
+    module = importlib.import_module(name)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/importlib/__init__.py", line 127, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1030, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 984, in _find_and_load_unlocked
+ModuleNotFoundError: No module named 'tabulate'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/jjj/Desktop/工作/电力交易/energy-storage-rl/scripts/29_milp_analyze.py", line 40, in <module>
+    main()
+  File "/Users/jjj/Desktop/工作/电力交易/energy-storage-rl/scripts/29_milp_analyze.py", line 34, in main
+    write_report_md(results, runs_dir / "report.md")
+  File "/Users/jjj/Desktop/工作/电力交易/energy-storage-rl/optimization/milp/analyze_results.py", line 198, in write_report_md
+    lines.append(df.to_markdown(index=False, floatfmt=",.1f"))
+  File "/Users/jjj/Library/Python/3.9/lib/python/site-packages/pandas/util/_decorators.py", line 333, in wrapper
+    return func(*args, **kwargs)
+  File "/Users/jjj/Library/Python/3.9/lib/python/site-packages/pandas/core/frame.py", line 2994, in to_markdown
+    tabulate = import_optional_dependency("tabulate")
+  File "/Users/jjj/Library/Python/3.9/lib/python/site-packages/pandas/compat/_optional.py", line 138, in import_optional_dependency
+    raise ImportError(msg)
+ImportError: Missing optional dependency 'tabulate'.  Use pip or conda to install tabulate.

@@ -1,0 +1,12 @@
+{
+  "name": "deg_50",
+  "province": "shandong",
+  "K": 200,
+  "deviation_bound": 0.1,
+  "deg_cost": 50.0,
+  "final_soc_min": 0.3,
+  "cycle_limit": null,
+  "scenario_method": "bootstrap",
+  "use_cvar": false,
+  "cvar_weight": 0.3
+}
