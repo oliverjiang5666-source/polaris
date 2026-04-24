@@ -76,6 +76,26 @@ class DPConfig:
     final_soc_penalty: float = 0.0    # 终态 SoC 惩罚权重（0 = 不约束）
     final_soc_target: float = 0.3     # 终态目标 SoC（若惩罚 > 0）
 
+    # L3-A Rolling Horizon TVF (Terminal Value Function)
+    # external_tvf: (S,) 数组, 若提供则作 V[T, :] 起点
+    # 注意: V[1, :] 是"明日全天 total revenue 期望", 约 ¥万级
+    #   直接 copy 给 V[T, :] 会让 DP 过度偏向囤电 (未来收益压倒当下)
+    # 所以用 normalize:
+    #   tvf_normalize="relative": V_tvf[s] = V[1, s] - V[1, ref_soc]
+    #     (只保留 SoC 相对 shadow value, ref_soc 的 V=0)
+    #   tvf_normalize="scale":    V_tvf[s] = V[1, s] × scale_factor
+    #   tvf_normalize="none":     V_tvf = V[1, :] 原样
+    # tvf_discount 再乘一次 (典型 0.2-0.5 而不是 0.9)
+    external_tvf: "np.ndarray | None" = None
+    tvf_discount: float = 0.3
+    tvf_normalize: str = "relative"
+    tvf_ref_soc: float = 0.5                      # relative 归一化的参考 SoC
+
+    # L3-D 二级限价 clip (§3.2.13)
+    # 正常市场限价 (元/MWh); None 表示不 clip
+    price_upper: "float | None" = None
+    price_lower: "float | None" = None
+
 
 class TensorDP:
     """
@@ -220,15 +240,44 @@ class TensorDP:
         T, R = price_scenarios.shape
         assert price_probs.shape == (T, R)
 
+        # L3-D 二级限价 clip
+        if self.config.price_lower is not None or self.config.price_upper is not None:
+            price_scenarios = np.clip(
+                price_scenarios,
+                self.config.price_lower if self.config.price_lower is not None else -np.inf,
+                self.config.price_upper if self.config.price_upper is not None else np.inf,
+            )
+
         # 概率归一化（兜底）
         probs = price_probs / price_probs.sum(axis=1, keepdims=True)
 
         # 初始化 V
         V = np.zeros((T + 1, self.S), dtype=np.float64)
 
-        # Terminal value: V[T, s] = 0 默认。若有 final_soc_penalty，对低 SoC 罚款
-        if self.config.final_soc_penalty > 0:
-            # V_T(s) = -penalty × max(0, target_soc - s)
+        # Terminal value: 优先级
+        #   1. external_tvf (L3-A rolling horizon TVF)
+        #   2. final_soc_penalty (legacy)
+        #   3. default 0
+        if self.config.external_tvf is not None:
+            tvf = np.asarray(self.config.external_tvf, dtype=np.float64)
+            if len(tvf) != self.S:
+                src_grid = np.linspace(self.soc_min, self.soc_max, len(tvf))
+                tvf = np.interp(self.state_grid, src_grid, tvf)
+
+            # Normalize 避免 V[1] 绝对值太大压倒当日
+            if self.config.tvf_normalize == "relative":
+                # V_tvf[s] = V[1, s] - V[1, ref_soc] (ref_soc 处 V=0, 其他差值保留)
+                ref_idx = int((self.config.tvf_ref_soc - self.soc_min) / self.config.delta_soc)
+                ref_idx = max(0, min(ref_idx, self.S - 1))
+                tvf = tvf - tvf[ref_idx]
+            elif self.config.tvf_normalize == "scale":
+                # scale factor: 让 tvf max 对齐当日典型 marginal value ~ 元/MWh × cap_mwh × 0.5
+                # 简化: 不用已知, 只用 discount 控制
+                pass
+            # else "none": 保留原样
+
+            V[T, :] = self.config.tvf_discount * tvf
+        elif self.config.final_soc_penalty > 0:
             below = np.maximum(0.0, self.config.final_soc_target - self.state_grid)
             V[T, :] = -self.config.final_soc_penalty * below
 

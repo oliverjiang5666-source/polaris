@@ -317,3 +317,55 @@ plant_defaults:
   agc_typical_mileage_per_mw_h: 3.0
   agc_typical_performance_coeff: 0.95
   agc_typical_clearing_price_yuan_per_mw: 6.0
+
+# ==============================================================================
+# 13. L3 优化开关 + 实测效果 (2025 全年 100MW/200MWh)
+# ==============================================================================
+# 每层改进的 config 字段 + 实测 capture 变化, 供调优参考.
+
+l3_optimizations:
+  # A. Rolling Horizon TVF (跨日价值函数)
+  # config: DPConfig.external_tvf, tvf_discount, tvf_normalize
+  # 实测: 100MW/200MWh (2h duration) 2025 全年 -0.32 pp
+  # 结论: 对 2h duration 储能无效 (日内就能满充满放一整个周期)
+  #       对 4h+ duration 储能预期更有效 (跨日价值才显著)
+  # 默认: OFF
+  tvf:
+    enabled_default: false
+    recommended_for_duration_hours: "4+"
+    tested_result_2h: "-0.32 pp capture"
+
+  # B. AGC 档位细化
+  # config: JointDPConfig.agc_up_levels_mw, agc_down_levels_mw
+  # 从 (0, 50, 100) 细化到 (0, 20, 40, 60, 80, 100)
+  # 0 代码改动, 只改 config
+  # 实测: 需真实 AGC 出清价数据才有意义, 目前 AGC 数据缺
+  agc_granularity:
+    default_levels_mw: [0, 50, 100]
+    recommended_levels_mw: [0, 20, 40, 60, 80, 100]
+    needs_real_agc_data: true
+
+  # C. CVaR SoC buffer (AGC 随机里程安全垫)
+  # config: JointDPConfig.agc_buffer_safety_k
+  # 0 = deterministic (原); 1.65 = 95% VaR; 2.33 = 99% VaR
+  # 仅 AGC 启用时有影响. 更保守 = SoC buffer 更大 = 电能量可用功率缩小
+  cvar_buffer:
+    default_k: 0.0
+    recommended_k_for_risk_averse: 1.65
+    tradeoff: "高 k 减少 AGC 违约但缩小电能量套利"
+
+  # D. 二级限价 clip (§3.2.13)
+  # config: DPConfig.price_upper, price_lower
+  # 山东具体数值待省价格主管部门文件, 默认 None
+  # 真实市场触发二级限价的年份 (连续 7 天超上限) DP 应提前 clip scenarios
+  secondary_limit_clip:
+    default: None
+    needs_official_price_cap: true
+    typical_shandong_upper: null      # 等价格文件补
+
+  # E. Ramp constraint
+  # 未实施 (需 2D state: soc + last_action, 复杂度大)
+  # 影响: 储能典型 ramp < 1 MW/s 远快于 15 min 调度粒度, 实际约束很少被触发
+  ramp_constraint:
+    implemented: false
+    priority: "low (ramp 对 15min 粒度约束很少 binding)"

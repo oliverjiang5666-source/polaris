@@ -177,6 +177,221 @@ class StorageBidCurve:
         return out
 
 
+def build_strict_from_value_function(
+    V: np.ndarray,                         # (T+1, S) DP 的 value function
+    dp,                                    # TensorDP 实例 (需 action_grid, state_grid, cfg, cap_mwh, eta_c, eta_d, dt)
+    init_soc: float,
+    rated_charge_power: float,
+    rated_discharge_power: float,
+    n_segments_each_side: int = 5,
+    lambda_range: tuple[float, float] = (-500.0, 2500.0),
+    n_lambda_samples: int = 400,
+) -> tuple[list[StorageBidSegment], list[StorageBidSegment]]:
+    """
+    Lee-Sun 2025 §II-C 真严格版 bid curve 构造.
+
+    核心: 对每个 (t, init_soc), 每个 action p 的"立即 reward + V_next(s+F(p))" 是 λ 的线性函数:
+        Q(p, λ) = slope(p) × λ + intercept(p, s)
+        slope(p)     = p × dt
+        intercept    = V[t+1, s + F(p)] - deg × |p| × dt
+
+    最优 action(λ) = argmax_p Q(p, λ) = upper envelope over lines.
+
+    Upper envelope 用 convex hull trick on lines (O(P log P)) 计算,
+    得到 breakpoints (λ*, p_active).
+
+    对 96 时段都在 init_soc 做 envelope, aggregate 出日 bid curve:
+      λ_grid 上每个 λ 计算 96 时段 argmax p 的加权平均 → 日 mean policy function p(λ)
+      再简化到 5 段.
+
+    Returns: (charge_segments, discharge_segments)
+    """
+    T_plus_1, S = V.shape
+    T = T_plus_1 - 1
+    action_grid = dp.action_grid
+    state_grid = dp.state_grid
+    dt = dp.dt
+    deg_cost = dp.config.deg_cost
+
+    # 预计算: 每个 action 对应的 delta_soc + 下一状态可达性
+    delta_soc = np.where(
+        action_grid >= 0,
+        -action_grid * dt / (dp.eta_d * dp.cap_mwh),
+        -action_grid * dt * dp.eta_c / dp.cap_mwh,
+    )
+    slopes = action_grid * dt                              # (P,)
+    deg_per_action = deg_cost * np.abs(action_grid) * dt   # (P,)
+
+    # λ grid
+    lambda_grid = np.linspace(lambda_range[0], lambda_range[1], n_lambda_samples)
+
+    # 对每个时段 t, 在 init_soc 下计算最优 action(λ)
+    p_matrix = np.zeros((T, n_lambda_samples))             # p^(t)(λ)
+
+    for t in range(T):
+        # Interpolate V[t+1] at (init_soc + delta_soc)
+        next_soc = init_soc + delta_soc                    # (P,)
+        # 物理可行性
+        feasible = (next_soc >= dp.soc_min - 1e-9) & (next_soc <= dp.soc_max + 1e-9)
+        next_soc_clipped = np.clip(next_soc, dp.soc_min, dp.soc_max)
+        # Interp
+        z = (next_soc_clipped - dp.soc_min) / dp.config.delta_soc
+        z_low = np.floor(z).astype(np.int64)
+        z_high = np.minimum(z_low + 1, S - 1)
+        b = z - z_low
+        b = np.where(z_low == z_high, 0.0, b)
+        V_next = (1 - b) * V[t + 1, z_low] + b * V[t + 1, z_high]
+
+        intercepts = V_next - deg_per_action               # (P,)
+        intercepts = np.where(feasible, intercepts, -1e18)
+
+        # Upper envelope: convex hull trick on lines {y = slope[i] × λ + intercept[i]}
+        envelope = _upper_envelope(slopes, intercepts, action_grid)
+        # envelope: list of (λ_left, slope, intercept, action_p), sorted by λ_left ascending
+        # 对 λ_grid 上每个 λ 找最优 p
+        for i, lam in enumerate(lambda_grid):
+            # envelope 末段都覆盖 +∞, 从后往前找 λ_left <= lam
+            p_at_lam = envelope[0][3]
+            for seg in envelope:
+                if seg[0] <= lam:
+                    p_at_lam = seg[3]
+                else:
+                    break
+            p_matrix[t, i] = p_at_lam
+
+    # 聚合: 日平均 p(λ)
+    p_avg = p_matrix.mean(axis=0)                          # (n_lambda_samples,)
+
+    # 拆分充电 (p < 0) 和放电 (p > 0)
+    discharge_lams, discharge_ps = [], []
+    charge_lams, charge_ps = [], []
+    for lam, p in zip(lambda_grid, p_avg):
+        if p > 1e-6:
+            discharge_lams.append(float(lam))
+            discharge_ps.append(float(p))
+        elif p < -1e-6:
+            charge_lams.append(float(lam))
+            charge_ps.append(float(-p))  # magnitude
+
+    # 放电: 价 λ ↗ 时 p ↗, 所以 (p, λ) 上做 monotone bid curve
+    #     bid curve: 对每个 5 段, 段价 = 触发 λ (使得 power 达到该段终点)
+    discharge_segments = _build_bid_from_aggregated(
+        powers=np.array(discharge_ps),
+        lams=np.array(discharge_lams),
+        rated_power=rated_discharge_power,
+        n_segments=n_segments_each_side,
+        sign=+1,
+    )
+    charge_segments = _build_bid_from_aggregated(
+        powers=np.array(charge_ps),
+        lams=np.array(charge_lams),
+        rated_power=rated_charge_power,
+        n_segments=n_segments_each_side,
+        sign=-1,
+    )
+
+    return charge_segments, discharge_segments
+
+
+def _upper_envelope(slopes, intercepts, actions):
+    """
+    Upper envelope of lines {y = slope[i] × λ + intercept[i]} using convex hull trick.
+
+    Returns: list of (λ_left, slope, intercept, action), sorted by λ_left ascending.
+    """
+    # Sort by slope asc; for same slope, keep max intercept
+    P = len(slopes)
+    order = np.argsort(slopes)
+    # Deduplicate same slope
+    dedup = []   # list of (slope, intercept, action)
+    for i in order:
+        if intercepts[i] < -1e17:  # infeasible
+            continue
+        if dedup and abs(dedup[-1][0] - slopes[i]) < 1e-9:
+            if intercepts[i] > dedup[-1][1]:
+                dedup[-1] = (float(slopes[i]), float(intercepts[i]), float(actions[i]))
+        else:
+            dedup.append((float(slopes[i]), float(intercepts[i]), float(actions[i])))
+
+    if not dedup:
+        return [(float("-inf"), 0.0, 0.0, 0.0)]
+
+    # Build envelope stack
+    envelope = []   # (λ_left, slope, intercept, action)
+    for slope, intercept, action in dedup:
+        # Pop back while new line dominates
+        while envelope:
+            prev_left, prev_slope, prev_int, prev_action = envelope[-1]
+            # Intersection of prev and new line: λ = (prev_int - intercept) / (slope - prev_slope)
+            if slope - prev_slope < 1e-9:
+                break
+            lam_cross = (prev_int - intercept) / (slope - prev_slope)
+            if lam_cross <= prev_left:
+                # new line crosses before prev_left → prev dominated from [prev_left onwards]
+                envelope.pop()
+            else:
+                break
+
+        if not envelope:
+            envelope.append((float("-inf"), slope, intercept, action))
+        else:
+            prev_left, prev_slope, prev_int, prev_action = envelope[-1]
+            if slope - prev_slope < 1e-9:
+                # Same slope (shouldn't happen after dedup but safety)
+                continue
+            lam_cross = (prev_int - intercept) / (slope - prev_slope)
+            envelope.append((lam_cross, slope, intercept, action))
+
+    return envelope
+
+
+def _build_bid_from_aggregated(powers, lams, rated_power, n_segments, sign):
+    """
+    给定 (p, λ) 聚合曲线 (已按 p 升序或 λ 升序), 拟合 5 段 bid curve.
+
+    策略: 把 [0, rated_power] 等分 n_segments 段, 每段找落在该 power 范围的 λ 均值作报价.
+    """
+    if len(powers) == 0:
+        if sign > 0:
+            return [StorageBidSegment(0.0, rated_power, 100000.0)]
+        else:
+            return [StorageBidSegment(-rated_power, 0.0, -100000.0)]
+
+    # 按 power 升序
+    order = np.argsort(powers)
+    p_sorted = powers[order]
+    l_sorted = lams[order]
+
+    # 分段: [0, P/n], [P/n, 2P/n], ...
+    width = rated_power / n_segments
+    segments = []
+    for k in range(n_segments):
+        p_lo = k * width
+        p_hi = (k + 1) * width if k < n_segments - 1 else rated_power
+        mask = (p_sorted >= p_lo) & (p_sorted < p_hi + 1e-6)
+        if mask.any():
+            seg_price = float(l_sorted[mask].mean())
+        elif k == 0:
+            seg_price = float(l_sorted.min()) if len(l_sorted) else 0.0
+        else:
+            seg_price = segments[-1].price_yuan_mwh + 1.0
+
+        if sign < 0:
+            segments.append(StorageBidSegment(-p_hi, -p_lo, seg_price))
+        else:
+            segments.append(StorageBidSegment(p_lo, p_hi, seg_price))
+
+    # 单调化 (保险)
+    for i in range(1, len(segments)):
+        if segments[i].price_yuan_mwh < segments[i-1].price_yuan_mwh:
+            segments[i].price_yuan_mwh = segments[i-1].price_yuan_mwh + 0.01
+
+    if sign < 0:
+        segments.reverse()
+
+    return segments
+
+
 def build_from_tensor_dp_plan(
     power_96: np.ndarray,                  # 96 点 Tensor DP 出的 power（正=放电、负=充电）
     lmp_96: np.ndarray,                    # 96 点 LMP (预期值或历史)

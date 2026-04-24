@@ -66,6 +66,12 @@ class JointDPConfig:
     agc_soc_reserve_hours: float = 0.5              # 调频需预留的 SoC 折算小时
     agc_throughput_coeff: float = 1.0               # 里程→降解吞吐转换系数
 
+    # L3-C CVaR SoC buffer
+    # 0 = deterministic (原版, = agc × T_reserve / cap)
+    # 1.65 = 95% VaR (保留 95% 情景下 AGC 里程 std)
+    # 2.33 = 99% VaR (更保守)
+    agc_buffer_safety_k: float = 0.0
+
     # 终态 SoC
     final_soc_penalty: float = 0.0
     final_soc_target: float = 0.5
@@ -170,8 +176,20 @@ class TensorDPJoint:
         power_ok = (action_abs + agc_up + agc_down) <= self.p_max + 1e-6  # (P,)
 
         # 约束 2-3 (SoC buffer): state-dependent
-        soc_buffer_up = agc_up * cfg.agc_soc_reserve_hours / self.cap_mwh
-        soc_buffer_down = agc_down * cfg.agc_soc_reserve_hours / self.cap_mwh
+        # L3-C CVaR: safety factor k × sqrt(T_reserve × mileage / cap) 为里程 std 的 VaR 安全垫
+        if cfg.agc_buffer_safety_k > 0:
+            # 里程 mean = agc × mileage_per_mw_h × T_reserve (MW·h)
+            # 里程 std ≈ 0.5 × mean (经验估计, 可调 - OU 过程的 stationary std)
+            # Cumulative energy std as fraction of cap_mwh
+            mileage_std_mwh = 0.5 * cfg.agc_mileage_per_mw_h * cfg.agc_soc_reserve_hours
+            safety_buffer = cfg.agc_buffer_safety_k * mileage_std_mwh / self.cap_mwh
+        else:
+            safety_buffer = 0.0
+        soc_buffer_up = agc_up * cfg.agc_soc_reserve_hours / self.cap_mwh + agc_up * safety_buffer / self.p_max * self.p_max
+        soc_buffer_down = agc_down * cfg.agc_soc_reserve_hours / self.cap_mwh + agc_down * safety_buffer / self.p_max * self.p_max
+        # 简化 (safety 按 agc magnitude 缩放)
+        soc_buffer_up = agc_up * (cfg.agc_soc_reserve_hours + safety_buffer * cfg.agc_soc_reserve_hours) / self.cap_mwh
+        soc_buffer_down = agc_down * (cfg.agc_soc_reserve_hours + safety_buffer * cfg.agc_soc_reserve_hours) / self.cap_mwh
 
         up_ok = (soc_vec - self.soc_min) >= soc_buffer_up - 1e-6        # (S,)
         down_ok = (self.soc_max - soc_vec) >= soc_buffer_down - 1e-6     # (S,)
