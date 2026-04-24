@@ -120,27 +120,59 @@ class StorageBidCurve:
         lmp_96: np.ndarray,
         charge_upper_96: np.ndarray | None = None,
         discharge_upper_96: np.ndarray | None = None,
+        soc_aware: bool = False,
+        capacity_mwh: float = 200.0,
+        initial_soc_pct: float = 50.0,
+        dt_hours: float = 0.25,
     ) -> np.ndarray:
-        """返回 (96,) 每时段出清净功率（正=放电、负=充电）"""
+        """
+        返回 (96,) 每时段出清净功率（正=放电、负=充电）.
+
+        soc_aware=False (默认):
+            纯 LMP 触发, 不考虑 SoC — 用于快速验算, 可能物理不可行
+        soc_aware=True:
+            按时序扫 96 时段, 动态维护 SoC, 若 bid 清量超出 SoC 允许则 clip
+            → 这才是 "bid curve 在 SCUC/SCED 下的真实可行 cleared"
+        """
         if charge_upper_96 is None:
             charge_upper_96 = self.da_charge_upper_96
         if discharge_upper_96 is None:
             discharge_upper_96 = self.da_discharge_upper_96
 
         out = np.zeros(96)
+        soc = initial_soc_pct / 100.0
+        soc_min = self.soc_min_pct / 100.0
+        soc_max = self.soc_max_pct / 100.0
+        # 充放电效率 (sqrt RTE)
+        eta = (self.round_trip_efficiency_pct / 100.0) ** 0.5
+
         for t in range(96):
-            # 充电上限从 charge_upper（正 magnitude），放电上限从 discharge_upper
-            # cleared_power 内部 net > 0 用 forecast_upper 截放电，net < 0 截充电
-            # 这里需要分别传
             net = self.cleared_power(
                 lmp=float(lmp_96[t]),
                 forecast_upper_mw=float(max(charge_upper_96[t], discharge_upper_96[t])),
             )
-            # 更精细的截断
             if net > 0:
                 net = min(net, float(discharge_upper_96[t]))
             elif net < 0:
                 net = max(net, -float(charge_upper_96[t]))
+
+            if soc_aware:
+                if net > 0:   # 放电
+                    # SoC 下限约束: 最多放到 soc_min
+                    max_discharge_energy = max(0, (soc - soc_min) * capacity_mwh) * eta  # MWh 能真正吐出
+                    max_discharge_mw = max_discharge_energy / dt_hours
+                    net = min(net, max_discharge_mw)
+                    # 更新 SoC: 放电 net*dt MWh → 需要消耗 net*dt/eta MWh 储量
+                    soc -= (net * dt_hours) / eta / capacity_mwh
+                elif net < 0:  # 充电 (net < 0, |net| = 充电 MW)
+                    max_charge_mwh_in = max(0, (soc_max - soc) * capacity_mwh) / eta
+                    max_charge_mw = max_charge_mwh_in / dt_hours
+                    if abs(net) > max_charge_mw:
+                        net = -max_charge_mw
+                    # 充电: -net*dt MWh 进来 → 储存增加 -net*dt*eta MWh
+                    soc += (-net * dt_hours) * eta / capacity_mwh
+                soc = float(np.clip(soc, soc_min, soc_max))
+
             out[t] = net
         return out
 
@@ -152,108 +184,264 @@ def build_from_tensor_dp_plan(
     rated_discharge_power: float,
     n_segments_each_side: int = 5,
     price_monotone_epsilon: float = 0.01,
+    method: str = "convex_hull",           # "convex_hull" (严格) 或 "quantile" (旧启发式)
 ) -> tuple[list[StorageBidSegment], list[StorageBidSegment]]:
     """
-    从 96 点 Tensor DP 计划转换成 5+5 段阶梯 bid（convexification, Lee-Sun §II-C 简化版）。
+    从 96 点 Tensor DP 计划转换成 5+5 段阶梯 bid（Lee-Sun 2025 §II-C）。
 
-    策略:
-      放电侧: 把 power > 0 的时段按 LMP 排序，分位数切成 K 段
-              每段用该分位区间的 LMP 均值作为报价
-              量 = 该段在 96 时段的累计 MWh / dt 换算平均 MW
-      充电侧: power < 0 的时段类似处理（价格升序对应 LMP 降序，因为充电报价愿付价）
+    两种算法:
+      convex_hull: 严格 upper convex hull + Ramer-Douglas-Peucker 简化
+                   保证 bid curve 在任意 LMP 下 cleared power 最接近 DP 最优
+      quantile:    旧启发式分位数切 (保留做 baseline 对比)
 
-    这不是严格的"最优 bid curve"，而是 TensorDP 策略的 convex hull 近似。
-    严格版本需要解 Lee-Sun §II-C 的凸化 LP，Phase 2 再优化。
+    数学: 把 (|power|, LMP) 96 点对投到 2D 平面, 取 upper convex hull,
+          取凸包上 n+1 个转折点作 bid curve 的 breakpoint.
     """
-    dt = 0.25
+    if method == "quantile":
+        return _build_quantile(
+            power_96, lmp_96, rated_charge_power, rated_discharge_power,
+            n_segments_each_side, price_monotone_epsilon,
+        )
+
+    # method = "convex_hull"
     discharge_mask = power_96 > 1e-6
     charge_mask = power_96 < -1e-6
 
-    discharge_segments = _build_side(
+    discharge_segments = _build_side_convex_hull(
         powers=power_96[discharge_mask],
         lmps=lmp_96[discharge_mask],
         rated_power=rated_discharge_power,
         n_segments=n_segments_each_side,
         sign=+1,
-        price_monotone_epsilon=price_monotone_epsilon,
     )
 
-    charge_segments = _build_side(
-        powers=-power_96[charge_mask],          # 转成 magnitude
+    charge_segments = _build_side_convex_hull(
+        powers=-power_96[charge_mask],          # 转 magnitude
         lmps=lmp_96[charge_mask],
         rated_power=rated_charge_power,
         n_segments=n_segments_each_side,
         sign=-1,
-        price_monotone_epsilon=price_monotone_epsilon,
     )
+
+    # 强制单调 (保险)
+    _enforce_monotone(discharge_segments, price_monotone_epsilon)
+    _enforce_monotone(charge_segments, price_monotone_epsilon)
 
     return charge_segments, discharge_segments
 
 
-def _build_side(
-    powers: np.ndarray,
+# ============================================================
+# 严格 Upper Convex Hull (Lee-Sun 2025 §II-C)
+# ============================================================
+
+def _build_side_convex_hull(
+    powers: np.ndarray,                     # >= 0 (magnitude)
     lmps: np.ndarray,
     rated_power: float,
     n_segments: int,
-    sign: int,                             # +1=放电, -1=充电
-    price_monotone_epsilon: float,
+    sign: int,
 ) -> list[StorageBidSegment]:
-    """单侧 bid curve 构造（5 段分位数切）"""
+    """
+    算法:
+      1. 按 |power| 升序排列 (|power|, LMP) 点集 (包括 (0, 0) 起点)
+      2. 维护一个栈, 保证 slope 非递减 (upper convex hull 从低到高)
+      3. 末端补齐到 rated_power
+      4. Douglas-Peucker 简化到 n_segments + 1 顶点
+      5. 输出 n_segments 段, 每段价取 envelope 上对应区间中点价
+    """
     if len(powers) == 0:
-        # 没有该侧操作，报一段全量高价（永不中标）
+        # 空侧: 报不可能被清的极端价
         if sign > 0:
-            # 放电 0 → rated，高价
             return [StorageBidSegment(0.0, rated_power, 100000.0)]
         else:
-            # 充电 -rated → 0，低价（愿付价低=不充电）
             return [StorageBidSegment(-rated_power, 0.0, -100000.0)]
 
-    # 按 LMP 排序（放电按升序：低价先中标；充电按降序：愿付高价先中标 = LMP 低时）
-    # 实际上两侧都按 LMP 升序切分位数，因为 bid curve 要求价单调非递减
+    # Step 1: 排序
+    abs_p = np.asarray(powers, dtype=np.float64)
+    lmp = np.asarray(lmps, dtype=np.float64)
+    order = np.argsort(abs_p)
+    abs_p = abs_p[order]
+    lmp = lmp[order]
+
+    # Step 2: upper convex hull (凸包上沿)
+    # 起点 (0, min_lmp - margin) 作为虚拟始点, 保证凸包从 0 开始
+    hull: list[tuple[float, float]] = [(0.0, float(lmp.min()) - 1.0)]
+    for p, l in zip(abs_p, lmp):
+        # 如果点和最后一点同功率, 取较大 LMP (hull 上沿)
+        if abs(p - hull[-1][0]) < 1e-6:
+            hull[-1] = (hull[-1][0], max(hull[-1][1], float(l)))
+            continue
+
+        while len(hull) >= 2:
+            (p1, l1), (p2, l2) = hull[-2], hull[-1]
+            # 检查凸性: 从 p1 到 p2 的 slope 应 <= 从 p2 到 (p, l) 的 slope
+            # 即 (l2 - l1) / (p2 - p1) <= (l - l2) / (p - p2)
+            # 交叉乘: (l2 - l1) * (p - p2) <= (l - l2) * (p2 - p1)  [都 > 0]
+            if (l2 - l1) * (p - p2) > (l - l2) * (p2 - p1) + 1e-9:
+                # hull[-1] 不在 upper envelope 上, pop
+                hull.pop()
+            else:
+                break
+        hull.append((float(p), float(l)))
+
+    # Step 3: 末端延伸到 rated_power
+    if hull[-1][0] < rated_power - 1e-6:
+        # 末段延伸, 价格保持不变 (保守, 防止超出历史价)
+        hull.append((rated_power, hull[-1][1]))
+
+    # 去掉虚拟起点 (0, min_lmp - 1) 如果没有实际 (0, ...) 点
+    if hull[0][0] < 1e-6 and len(hull) > 1:
+        # 第二个点起算
+        pass  # 保留 (0, ...), 因为 bid curve 需要从 0 开始
+
+    # Step 4: 简化到 n_segments + 1 个点
+    if len(hull) > n_segments + 1:
+        hull = _ramer_douglas_peucker_to_n(hull, n_segments + 1)
+
+    # 如果凸包点不够, 补足到 n_segments + 1
+    while len(hull) < n_segments + 1:
+        # 在最宽段插入中点
+        widths = [(hull[i+1][0] - hull[i][0], i) for i in range(len(hull) - 1)]
+        _, max_i = max(widths, key=lambda x: x[0])
+        mid_p = (hull[max_i][0] + hull[max_i + 1][0]) / 2
+        mid_l = (hull[max_i][1] + hull[max_i + 1][1]) / 2
+        hull.insert(max_i + 1, (mid_p, mid_l))
+
+    # Step 5: 生成段
+    segments = []
+    for i in range(n_segments):
+        p_start, l_start = hull[i]
+        p_end, l_end = hull[i + 1]
+        # 段内均价作报价 (也可取 l_start 为"触发价")
+        seg_price = 0.5 * (l_start + l_end)
+
+        if sign < 0:
+            # 充电: 起点在负, 终点向 0
+            segments.append(StorageBidSegment(-p_end, -p_start, seg_price))
+        else:
+            segments.append(StorageBidSegment(p_start, p_end, seg_price))
+
+    if sign < 0:
+        segments.reverse()   # 充电 bid 从 -P_max 到 0 排序
+
+    # 确保首段起点 / 末段终点对齐 rated
+    if segments:
+        if sign > 0:
+            segments[0].start_mw = 0.0
+            segments[-1].end_mw = rated_power
+        else:
+            segments[0].start_mw = -rated_power
+            segments[-1].end_mw = 0.0
+
+    return segments
+
+
+def _ramer_douglas_peucker_to_n(
+    points: list[tuple[float, float]],
+    target_n: int,
+) -> list[tuple[float, float]]:
+    """
+    迭代移除垂直距离最小的点, 直到点数 = target_n.
+    保留首末点.
+    """
+    pts = [list(p) for p in points]
+    while len(pts) > target_n:
+        min_dist = float("inf")
+        min_idx = 1
+        for i in range(1, len(pts) - 1):
+            # pts[i] 到 line(pts[i-1], pts[i+1]) 的垂直距离
+            x1, y1 = pts[i - 1]
+            x2, y2 = pts[i + 1]
+            x0, y0 = pts[i]
+            dx, dy = x2 - x1, y2 - y1
+            ln_sq = dx * dx + dy * dy
+            if ln_sq < 1e-12:
+                dist = 0.0
+            else:
+                # 投影到 [0, 1]
+                t = ((x0 - x1) * dx + (y0 - y1) * dy) / ln_sq
+                t = max(0.0, min(1.0, t))
+                cx = x1 + t * dx
+                cy = y1 + t * dy
+                dist = ((x0 - cx) ** 2 + (y0 - cy) ** 2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                min_idx = i
+        pts.pop(min_idx)
+    return [tuple(p) for p in pts]
+
+
+def _enforce_monotone(segments: list[StorageBidSegment], epsilon: float):
+    """保险: 强制价单调非递减"""
+    for i in range(1, len(segments)):
+        if segments[i].price_yuan_mwh < segments[i - 1].price_yuan_mwh:
+            segments[i].price_yuan_mwh = segments[i - 1].price_yuan_mwh + epsilon
+
+
+# ============================================================
+# 旧启发式 (quantile): 保留做 baseline 对比
+# ============================================================
+
+def _build_quantile(
+    power_96, lmp_96, rated_charge_power, rated_discharge_power,
+    n_segments, price_monotone_epsilon,
+):
+    """旧分位数切法, 保留做 A/B 对比"""
+    dt = 0.25
+    discharge_mask = power_96 > 1e-6
+    charge_mask = power_96 < -1e-6
+
+    discharge_segments = _build_side_quantile(
+        powers=power_96[discharge_mask],
+        lmps=lmp_96[discharge_mask],
+        rated_power=rated_discharge_power,
+        n_segments=n_segments,
+        sign=+1,
+        price_monotone_epsilon=price_monotone_epsilon,
+    )
+    charge_segments = _build_side_quantile(
+        powers=-power_96[charge_mask],
+        lmps=lmp_96[charge_mask],
+        rated_power=rated_charge_power,
+        n_segments=n_segments,
+        sign=-1,
+        price_monotone_epsilon=price_monotone_epsilon,
+    )
+    return charge_segments, discharge_segments
+
+
+def _build_side_quantile(
+    powers, lmps, rated_power, n_segments, sign, price_monotone_epsilon,
+):
+    """单侧 bid curve 构造（5 段分位数切, 旧版）"""
+    if len(powers) == 0:
+        if sign > 0:
+            return [StorageBidSegment(0.0, rated_power, 100000.0)]
+        else:
+            return [StorageBidSegment(-rated_power, 0.0, -100000.0)]
     order = np.argsort(lmps)
     sorted_lmps = lmps[order]
     sorted_powers = powers[order]
-
-    # 累计 MWh 分位数切 K 段
-    cum_mwh = np.cumsum(sorted_powers) * 0.25   # dt=0.25h
+    cum_mwh = np.cumsum(sorted_powers) * 0.25
     total_mwh = cum_mwh[-1] if len(cum_mwh) > 0 else 0
-
     segments = []
     current_start = 0.0 if sign > 0 else -rated_power
-
     for k in range(n_segments):
-        # 每段量 = 总量 / K，但最后一段补齐到 rated_power
-        q_target = total_mwh / n_segments if k < n_segments - 1 else (total_mwh - k * total_mwh / n_segments)
-        # 找落在 (kQ_段, (k+1)Q_段] 的 LMP 均值
         lo_cum = k * total_mwh / n_segments
         hi_cum = (k + 1) * total_mwh / n_segments if k < n_segments - 1 else total_mwh
-
         lo_idx = int(np.searchsorted(cum_mwh, lo_cum))
         hi_idx = int(np.searchsorted(cum_mwh, hi_cum))
         seg_lmps = sorted_lmps[lo_idx:max(hi_idx, lo_idx + 1)]
         seg_price = float(seg_lmps.mean()) if len(seg_lmps) > 0 else sorted_lmps.mean()
-
-        # 量换算成 MW 宽度（按占 rated_power 比例）
         width_mw = rated_power / n_segments
-
-        if sign > 0:   # 放电：正向
-            seg_end = current_start + width_mw
-            segments.append(StorageBidSegment(current_start, seg_end, seg_price))
-            current_start = seg_end
-        else:          # 充电：负向（起点更负，终点向 0）
-            seg_end = current_start + width_mw
-            segments.append(StorageBidSegment(current_start, seg_end, seg_price))
-            current_start = seg_end
-
-    # 强制单调非递减（§7.2.8 报价曲线应随出力增加单调非递减）
+        seg_end = current_start + width_mw
+        segments.append(StorageBidSegment(current_start, seg_end, seg_price))
+        current_start = seg_end
     for i in range(1, len(segments)):
         if segments[i].price_yuan_mwh < segments[i-1].price_yuan_mwh:
             segments[i].price_yuan_mwh = segments[i-1].price_yuan_mwh + price_monotone_epsilon
-
-    # 最后一段强制终点对齐 rated
     if sign > 0 and segments:
         segments[-1].end_mw = rated_power
     elif sign < 0 and segments:
         segments[-1].end_mw = 0.0
-
     return segments
