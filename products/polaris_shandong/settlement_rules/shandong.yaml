@@ -1,0 +1,319 @@
+# ==============================================================================
+# 山东电力市场规则（试行, 2026 年 3 月征求意见稿）— 独立新型储能电站规则数据化
+# ==============================================================================
+# 数据来源：《山东电力市场规则(试行)_2026年3月征求意见稿.pdf》(363 页)
+# 适用：独立新型储能电站参与日前 / 日内 / 实时 / 辅助服务 / 容量补偿 市场
+#
+# 所有条款标注出处（§x.y.z），便于审计和升级。
+
+province: shandong
+version: "2026-03-draft"
+effective_date: "2026-03"
+source: "山东电力市场规则(试行)_2026年3月征求意见稿.pdf"
+entity_type: "independent_new_storage"   # 独立新型储能电站
+
+# ==============================================================================
+# 1. 市场结构（§3.1.14, §5.6.2, §6.3.2, §9.1.5, §10.1.2）
+# ==============================================================================
+market:
+  steps_per_day: 96                      # 15 分钟粒度（§5.6.2）
+  minutes_per_step: 15
+  step_endpoint_convention: "end"        # 00:00-00:15 标记为 00:15，24:00 表示全天末
+
+  settlement_mode: "day_clear_month_settle"  # §14.1.6 日清月结
+  pricing: "LMP"                         # 节点边际电价（§3.2.18）
+
+  # 日前时间线（§6.3.2, §7.2.3, §8.6.1）
+  timeline:
+    nwp_forecast_submit: "D-1 08:00"     # 新能源报 96 点预测
+    dispatch_forecast: "D-1 08:30"        # 调度预测负荷
+    boundary_publish: "D-1 08:45"         # 边界条件发布
+    first_submit_deadline: "D-1 09:45"    # 首次申报截止（未申报用缺省参数）
+    pre_balance_done: "D-1 11:00"         # 日前预平衡
+    boundary_update: "D-1 14:30"          # 边界条件更新
+    da_economic_submit: "D-1 15:00"       # 日前市场经济出清申报截止
+    da_economic_clear: "D-1 17:00"        # 经济出清完成
+    da_uc_publish: "D-1 19:30"            # 日前可靠性机组组合结果发布
+
+  # 日内市场（§9.1.5）
+  intraday:
+    mode: "scheduled_plus_on_demand"      # 定时 + 按需
+    scheduled_open_times: ["D 07:00", "D 14:00"]
+    scheduled_coverage:
+      "D 07:00": ["D 08:00", "D 24:00"]
+      "D 14:00": ["D 15:00", "D 24:00"]
+    publishes_price: false                # §9.5.1 日内不发布价格
+    uses_sealed_da_bid: true              # 现阶段用日前封存申报出清
+
+  # 实时市场（§10.1.2, §10.3.4）
+  realtime:
+    cycle_minutes: 15
+    horizon_minutes: 120                  # 滚动未来 2 小时
+    lookahead_from_execution_time: 15     # 实际运行前 15 分钟出清
+    settlement_by_actual_metered: true    # 按实际上网/用电量结算
+
+# ==============================================================================
+# 2. 独立新型储能申报参数（§5.2.4 第五项, §7.2.8）
+# ==============================================================================
+storage_params:
+  required:                               # 必报参数
+    rated_charge_power_mw: null           # 待电站填
+    rated_discharge_power_mw: null
+    max_rated_duration_hours: null        # = capacity_mwh / rated_power_mw
+    min_continuous_minutes: 15            # 最小连续时长，必须 15 分钟整数倍
+    soc_min_pct: null
+    soc_max_pct: null
+    round_trip_efficiency_pct: null       # 1% ~ 99%
+
+  optional:
+    terminal_soc_target_pct: null         # 可选期望终态 SoC（申报则作为 UC 边界 + 次日起始）
+    min_standby_minutes: 15
+
+# ==============================================================================
+# 3. Bid Curve 格式（§7.2.8, §7.2.16 独立储能出清目标函数）
+# ==============================================================================
+bid_curve:
+  # 充电 5 段
+  charge:
+    n_segments_max: 5
+    segment_min_mw: 2.0                   # 每段区间最小长度
+    first_segment_start: "rated_charge_power_negative"  # = -P^rated_charge
+    last_segment_end_mw: 0.0
+    price_monotonic: "non_decreasing"     # 报价随出力增加单调非递减
+    sign_convention: "negative_for_charge"
+
+  # 放电 5 段
+  discharge:
+    n_segments_max: 5
+    segment_min_mw: 2.0
+    first_segment_start_mw: 0.0
+    last_segment_end: "rated_discharge_power_positive"
+    price_monotonic: "non_decreasing"
+    sign_convention: "positive_for_discharge"
+
+  # 通用
+  price_precision_yuan_per_mwh: 0.01      # 山东暂未明文，保守默认（甘肃是 10，山东可能更细，待确认）
+  segment_transition: "previous"          # 两段衔接点对应报价值属于前一段报价
+  sealed_for_intraday: true               # §9.2.1 日内用日前封存申报
+
+# ==============================================================================
+# 4. 价格限值（§3.2.11, §3.2.13）
+# ==============================================================================
+price_limits:
+  # 正常市场限价（具体数值在价格主管部门文件，本 yaml 留空待填）
+  bid_price_lower: null
+  bid_price_upper: null
+  clearing_price_lower: null
+  clearing_price_upper: null
+
+  # 二级限价触发条件（§3.2.13）
+  secondary_limit:
+    trigger_condition_1: "7_days_continuous_exceed_upper"  # 连续 7 天统一结算点电价超上限
+    trigger_condition_2: "4h_continuous_40pct_nodes_hit_max"  # 连续 4 小时 40%+ 节点达上限
+    secondary_upper_pct_reduction: 20     # 二级上限 = 一级上限 × 80%
+
+# ==============================================================================
+# 5. 结算价格锚点（§3.2.28, §3.2.29, §14.3.1, §14.3.2）
+# ==============================================================================
+settlement_price:
+  generation_side:
+    # 发电侧放电：按**发电侧物理节点 15 分钟节点电价**结算
+    price_source: "generation_node_lmp_15min"
+    fallback_for_multiple_busbars: "arithmetic_mean_of_busbar_lmps"
+    fallback_for_no_busbar: "region_generation_lmp_mean"  # 按地市发电侧节点算术平均
+
+  user_side:
+    # 独立新型储能用电侧（充电）：物理节点 15 分钟节点电价
+    # 其他用户侧：统一结算点现货价
+    storage_price_source: "user_node_lmp_15min"
+    storage_fallback_hourly: "weighted_avg_of_15min_nodal"  # 暂不具备条件时
+    other_user_price_source: "unified_settlement_point_realtime"
+
+  mlt_reference_point:
+    # 中长期结算参考点（§4.3.7）
+    centralized_bid_default: "realtime_unified_settlement_point"
+    bilateral_negotiated: "optional_physical_node_or_unified"
+
+# ==============================================================================
+# 6. 电能量结算公式（§14.3.4, §14.3.5, §14.5.5-7, §14.6.3-5）
+# ==============================================================================
+# 发电侧（储能放电收入）:
+#   R_发电_电能量 = R_实时 + R_日前 + R_中长期
+#   R_实时  = Σ [Q^actual_上网_t × P^实时节点_t]
+#   R_日前  = Σ [Q^DA出清_t × (P^日前节点_t − P^实时统一_t)]
+#   R_中长期 = Σ [Q^MLT_t × (P^MLT − P^参考点现货_t)]
+#
+# 用户侧（储能充电支出）:
+#   C_用户_电能量 = C_实时 + C_日前 + C_中长期
+#   C_实时  = Σ [Q^actual_用电_t × P^实时节点_t]   (独立储能用电侧取节点价)
+#   C_日前  = Σ [Q^DA_用电_t × (P^日前节点_t − P^实时统一_t)]
+#   C_中长期 = Σ [Q^MLT_t × (P^MLT − P^参考点现货_t)]
+#
+# 净储能收入 = R_发电_电能量 − C_用户_电能量
+
+settlement:
+  two_settlement_components:
+    realtime_by_actual_metered: true      # 实时按实量过账
+    day_ahead_cfd_vs_realtime: true        # 日前量 × (日前节点价 − 实时统一价)
+    mlt_cfd_vs_reference: true             # 中长期量 × (合约价 − 参考点现货价)
+
+  charge_settlement_convention:
+    sign: "user_side_cost"                 # 充电按用户侧电费
+    uses_node_price: true                  # 独立储能特例（§3.2.29）
+
+  discharge_settlement_convention:
+    sign: "generation_side_revenue"
+    uses_node_price: true
+
+  blockage_fee:
+    # §14.3.6 阻塞费用 = 应收 − 应付差额，由全体工商业用户分摊或分享
+    storage_does_not_bear: true            # 储能不直接承担阻塞费
+
+# ==============================================================================
+# 7. 容量补偿（§3.4.3, §3.4.6 第四项）
+# ==============================================================================
+capacity_compensation:
+  enabled: true
+  frequency: "monthly"
+  price_source: "provincial_price_bureau"  # 按省发改委核定电价
+  price_yuan_per_kw_month: null            # 待填（具体数值在省发改委政策文件）
+
+  # 独立新型储能日可用容量公式（§3.4.6 第四项 1）:
+  # daily_available_capacity = rated_discharge_power × K × H / 24
+  #   K = 电站当日运行及备用小时数 / 24（计划检修、临故修不计入）
+  #   H = 日可用等效小时数 = 核定放电功率下的最大连续放电小时数
+  daily_formula: "rated_discharge_power * K * H / 24"
+  K_definition: "available_hours_on_day / 24"
+  H_definition: "max_continuous_discharge_hours_at_rated_power"
+  requires_dispatch_certification: true    # 核定充放电功率/小时数由电力调度机构测试认定
+
+  # 月度发电侧容量补偿费用分配（§3.4.4）:
+  # 发电侧主体月度容量补偿费 = 全网月度容量补偿费 × 主体月度可用容量 / 全网月度可用容量
+  monthly_formula: "total_network_fee * entity_monthly_capacity / total_network_monthly_capacity"
+
+# ==============================================================================
+# 8. AGC 调频辅助服务（§11.1, §11.2, §14.8）
+# ==============================================================================
+agc:
+  enabled: true
+  clearing: "joint_with_spot"              # 与现货联合出清（§5.4.8, §11.1.4）
+  fallback_if_infra_not_ready: "separate_clearing"
+
+  # 调频费用公式（§14.8.3）:
+  # C_AGC_t = D_t × K_pd,t × Y_AGC,t
+  #   D_t     = 小时调频里程总和 (MW)
+  #   K_pd,t  = 调节性能指标
+  #   Y_AGC,t = 出清价格 (元/MW)
+  pricing_mechanism: "unified_price_per_mileage"  # 基于调频里程的单一制
+  fee_formula: "mileage * performance * clearing_price"
+
+  # 预留容量要求（§11.2.3）
+  reserves:
+    direction: "bidirectional"             # 上调频 + 下调频
+    mandatory_for_capacity_fee_recipients: true  # §11.1.3 获容量电费的经营主体原则上应参与
+    # 火电默认上下调频预留各 10%：f_u% = 10%
+    thermal_default_reserve_pct: 10
+    # 储能：在日前申报的可调功率和 SoC 范围基础上预留功率和电量
+    storage_reserve_derived_from_bid: true
+
+  # 参与条件（§11.1.6）
+  participation_requirements:
+    storage:
+      realtime_soc_feedback_required: true
+      realtime_updown_capability_feedback_required: true
+      dispatch_direct_control_required: true
+
+  # 费用分摊（§14.8.6-7）
+  cost_allocation: "non_market_gen + user_side_proportional"
+  principle: "who_benefits_who_pays"
+
+# ==============================================================================
+# 9. 调度强制调用补偿（§8.5.11, §14.10.3）
+# ==============================================================================
+# 当电力供应紧张或安全裕度低时，调度可强制调用储能充/放电
+# 若调用期间实时市场充放电收益为负，给予运行成本补偿
+forced_dispatch:
+  enabled: true
+  triggers:
+    - "grid_supply_tight"
+    - "safety_margin_low"
+    - "transmission_constraint"
+
+  compensation_condition: "actual_realtime_charge_discharge_loss"
+
+  # 充电调用补偿:
+  # R_成本 = Q_充电 × P_充电调用
+  # R_收益 = Q_充电 × (1-损耗率) × (P_最近放电 + P_容量补偿)
+  # 补偿 = max(0, R_成本 - R_收益)
+  charge_formula:
+    cost: "Q_charge × P_charge_call"
+    revenue: "Q_charge × (1-loss_rate) × (P_recent_discharge + P_capacity)"
+    compensation: "max(0, cost - revenue)"
+
+  discharge_formula:
+    cost: "Q_discharge / (1-loss_rate) × P_corresponding_charge"
+    revenue: "Q_discharge × (P_realtime_discharge + P_capacity)"
+    compensation: "max(0, cost - revenue)"
+
+# ==============================================================================
+# 10. 出清约束（§8.5.9, §10.3.1）
+# ==============================================================================
+clearing:
+  # §8.5.9 独立新型储能按申报信息出清运行日充放电计划
+  day_ahead:
+    includes_cycle_count_constraint: true
+    includes_start_soc_constraint: true
+    includes_end_soc_constraint: true       # 若申报期望终态 SoC
+
+  # §10.3.1 实时市场 SCED 不包含:
+  real_time:
+    includes_cycle_count_constraint: false   # ⚠️ 实时不约束充放电循环次数
+    includes_start_soc_constraint: false
+    includes_end_soc_constraint: false       # ⚠️ 实时不约束起止 SoC
+    # 但 SoC 本身仍需 ∈ [min, max] 物理边界
+
+  # §9.3.11 日内出清储能起始 SoC = 开市时实际 SoC + 开市到出清起始时刻的充放电计划
+  intraday:
+    soc_initial_formula: "actual_soc_at_open + scheduled_power_until_clear_start"
+
+# ==============================================================================
+# 11. 市场力监管（§15 第二节）
+# ==============================================================================
+# 异常行为（§8.5.14(二)）触发调用测试：
+#   1. 申报价格远高于同类型机组边际成本或核定成本
+#   2. 无故降低/提高出力
+#   3. 频繁改变关键运行参数
+#   4. 储能不能按申报充放电 → 测试失败 → 纳入并网管理细则
+market_power:
+  abnormal_behavior_triggers:
+    - "bid_price_far_above_marginal_cost"
+    - "unscheduled_output_deviation"
+    - "frequent_param_changes"
+    - "cannot_execute_bid"
+  consequence: "dispatch_call_test"           # 调用测试
+  failure_handling: "grid_ops_management"     # 纳入并网运行管理细则
+
+# ==============================================================================
+# 12. 默认运行参数（某 200MW/400MWh 典型电站，用于 smoke test）
+# ==============================================================================
+plant_defaults:
+  capacity_mw: 200.0
+  capacity_mwh: 400.0
+  rated_charge_power_mw: 200.0
+  rated_discharge_power_mw: 200.0
+  max_rated_duration_hours: 2.0            # 400 / 200
+  soc_min_pct: 5.0
+  soc_max_pct: 95.0
+  round_trip_efficiency_pct: 90.0          # 充放电各 √0.9 ≈ 94.87%
+  min_continuous_minutes: 15
+
+  # 容量补偿参数（示例值，真实需从省发改委核定）
+  certified_discharge_power_mw: 200.0
+  certified_duration_hours: 2.0            # H
+  typical_K: 1.0                           # 假设全月在线
+  capacity_price_yuan_per_kw_month: null   # 待填省政策
+
+  # AGC 参数（示例值，真实需从调度测试认定 + 市场出清历史）
+  agc_typical_mileage_per_mw_h: 3.0
+  agc_typical_performance_coeff: 0.95
+  agc_typical_clearing_price_yuan_per_mw: 6.0
